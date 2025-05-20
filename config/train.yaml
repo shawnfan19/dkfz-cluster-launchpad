@@ -1,0 +1,12 @@
+submit_script: ${oc.env:DELPHI_ROOT_DIR}/submit/dkfz/submit.sh
+runs: 
+- script: ${oc.env:DELPHI_ROOT_DIR}/apps/train.py
+  script_args: config=config/train.yaml device=cuda model.mask_ties=false model.loss.zero_inflate=true log.run_name=delphi-zero-inflate
+  memory: 16
+  gpu: true
+  gpu_num: 1
+  j_exclusive: true
+  gpu_mem: 10
+  queue: gpu-debian
+  stdout: ${oc.env:DELPHI_ROOT_DIR}/logs/train/train.stdout
+  stderr: ${oc.env:DELPHI_ROOT_DIR}/logs/train/train.stderr
