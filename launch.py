@@ -26,6 +26,7 @@ class GPUQueue(Enum):
 
 @dataclass
 class RunConfig:
+    dry: bool = False
     submit_script: str = "./submit/dkfz/submit.sh"
     script: str = "apps/train.py"
     script_args: str = ""
@@ -154,7 +155,8 @@ def main():
             command = base_command + " " + override + '"'
             try:
                 print(command)
-                subprocess.run(command, check=True, shell=True)
+                if not cfg.dry:
+                    subprocess.run(command, check=True, shell=True)
             except subprocess.CalledProcessError as e:
                 print(f"Script exited with error: {e.returncode}")
                 sys.exit(e.returncode)
@@ -162,7 +164,8 @@ def main():
         command = base_command + '"'
         try:
             print(command)
-            subprocess.run(command, check=True, shell=True)
+            if not cfg.dry:
+                subprocess.run(command, check=True, shell=True)
         except subprocess.CalledProcessError as e:
             print(f"Script exited with error: {e.returncode}")
             sys.exit(e.returncode)

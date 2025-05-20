@@ -22,10 +22,9 @@ script_overrides:
     - config/disease_list/xvii._congenital_abnormalities.yaml
     - config/disease_list/death.yaml
   ckpt:
-    # - ${oc.env:DELPHI_CKPT_DIR}/prs/delphi-ckpt/delphi-no-prs
-    # - ${oc.env:DELPHI_CKPT_DIR}/prs/delphi-ckpt/delphi
-    - prs/delphi-ckpt/delphi-no-prs
-    - prs/delphi-ckpt/delphi
+    - ${oc.env:DELPHI_CKPT_DIR}/prs/delphi-ckpt/delphi-no-prs
+    - ${oc.env:DELPHI_CKPT_DIR}/prs/delphi-ckpt/delphi
+    - ${oc.env:DELPHI_CKPT_DIR}/prs/delphi-ckpt/delphi-prs-mlp
 memory: 24
 gpu: false
-queue: medium
+queue: long
