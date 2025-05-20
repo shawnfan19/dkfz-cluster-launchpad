@@ -4,6 +4,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
+import itertools
 from omegaconf import OmegaConf
 
 
@@ -28,7 +29,7 @@ class RunConfig:
     submit_script: str = "./submit/dkfz/submit.sh"
     script: str = "apps/train.py"
     script_args: str = ""
-    script_overrides: list = field(default_factory=list)
+    script_overrides: dict = field(default_factory=dict)
     memory: int = 16
     gpu: bool = True
     gpu_num: int = 1
@@ -143,10 +144,16 @@ def main():
     print(f'{base_command}"')
 
     if len(cfg.script_overrides) > 0:
-        for override in cfg.script_overrides:
-            command = base_command + f' {override}"'
-            print(f"{command}")
+
+        arg_names = cfg.script_overrides.keys()
+        arg_vals = cfg.script_overrides.values()
+        arg_combos = list(itertools.product(*arg_vals))
+        
+        for arg_combo in arg_combos:
+            override = " ".join([f"{arg_name}={arg_val}" for arg_name, arg_val in zip(arg_names, arg_combo)])
+            command = base_command + " " + override + '"'
             try:
+                print(command)
                 subprocess.run(command, check=True, shell=True)
             except subprocess.CalledProcessError as e:
                 print(f"Script exited with error: {e.returncode}")
@@ -154,6 +161,7 @@ def main():
     else:
         command = base_command + '"'
         try:
+            print(command)
             subprocess.run(command, check=True, shell=True)
         except subprocess.CalledProcessError as e:
             print(f"Script exited with error: {e.returncode}")
