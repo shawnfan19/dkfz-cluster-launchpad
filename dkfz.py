@@ -3,9 +3,10 @@ from enum import Enum
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from typing import Optional
 import itertools
 from omegaconf import OmegaConf
+import yaml
+import tempfile
 
 
 class CPUQueue(Enum):
@@ -27,18 +28,17 @@ class GPUQueue(Enum):
 @dataclass
 class RunConfig:
     dry: bool = False
-    submit_script: str = "./submit/dkfz/submit.sh"
-    script: str = "apps/train.py"
-    script_args: str = ""
-    script_overrides: dict = field(default_factory=dict)
+    script_with_args: str = "apps/train.py"
+    script_overrides: None | str = None
     memory: int = 16
     gpu: bool = True
     gpu_num: int = 1
     j_exclusive: bool = True
     gpu_mem: int = 10
+    cuda_version: str = "11.7"
     queue: str = "gpu-debian"
-    stdout: Optional[str] = None
-    stderr: Optional[str] = None
+    stdout: None | str = None
+    stderr: None | str = None
     blacklist: list = field(default_factory=list)
     whitelist: list = field(default_factory=list)
 
@@ -95,64 +95,104 @@ def parse_gpu_config(run_cfg: RunConfig) -> str:
 def main():
 
     cli_cfg = OmegaConf.from_cli()
-    file_cfg = OmegaConf.load(cli_cfg.config)
-    # We remove 'config' attribute from config as the underlying DataClass does not have it
-    del cli_cfg.config
-
     default_cfg = OmegaConf.structured(RunConfig)
+    if hasattr(cli_cfg, "config"):
+        file_cfg = OmegaConf.load(cli_cfg.config)
+        del cli_cfg.config
+    else:
+        file_cfg = default_cfg
+
     cfg = OmegaConf.merge(default_cfg, file_cfg, cli_cfg) # type: ignore
     cfg: RunConfig = OmegaConf.to_object(cfg) # type: ignore
-    submit_script = cfg.submit_script
 
     validate_run_config(cfg)
 
-    base_command = "bsub"
+    bsub_command = "bsub"
     
-    base_command += f" -R "
-    base_command += "\""
+    bsub_command += f" -R "
+    bsub_command += "\""
     
     memory_args = parse_memory_config(cfg)
-    base_command += memory_args
+    bsub_command += memory_args
         
     blacklist = parse_blacklist_config(cfg)
     if blacklist != "":
-        base_command += f" select[{blacklist}]"
+        bsub_command += f" select[{blacklist}]"
     
     whitelist = parse_whitelist_config(cfg)
     if whitelist != "":
-        base_command += f" select[{whitelist}]"
+        bsub_command += f" select[{whitelist}]"
     
-    base_command += "\""
+    bsub_command += "\""
     
     if cfg.gpu:
         gpu_args = parse_gpu_config(cfg)
-        base_command += f" -gpu {gpu_args}"
+        bsub_command += f" -gpu {gpu_args}"
 
     if cfg.stdout:
         os.makedirs(os.path.dirname(cfg.stdout), exist_ok=True)
-        base_command += f" -o {cfg.stdout}"
+        bsub_command += f" -o {cfg.stdout}"
 
     if cfg.stderr:
         os.makedirs(os.path.dirname(cfg.stderr), exist_ok=True)
-        base_command += f" -e {cfg.stderr}"
+        bsub_command += f" -e {cfg.stderr}"
 
     queue = parse_queue_config(cfg)
-    base_command += f" -q {queue}"
+    bsub_command += f" -q {queue}"
 
-    base_command += (
-        f' /bin/bash -l -c "{submit_script} {cfg.script} {cfg.script_args}'
+    python_command = f"python {cfg.script_with_args}"
+    if cfg.gpu and (cfg.gpu_num > 1):
+        python_command = f"torchrun --standalone --nproc-per-node={cfg.gpu_num} {cfg.script_with_args}"
+    
+    script_lines = [
+        "#!/bin/bash\n",
+        "source ~/.bashrc\n",
+        "set -a\n",
+        "source .env\n",
+        "set +a\n",
+        f"export CUDA_HOME=/usr/local/cuda-{cfg.cuda_version}\n",
+        f"export CUDA_CACHE_DISABLE=1\n",
+        f"echo 'activate env:'\n",
+        f"echo $PYTHON_ENV\n",
+        f"micromamba activate $PYTHON_ENV\n",
+        python_command + " $@\n",
+    ]
+    tmp_dir = "/dev/shm" if os.path.exists("/dev/shm") else "."
+    fd, tmp_path = tempfile.mkstemp(
+        prefix="sbatch_",
+        suffix=".sh",
+        dir=tmp_dir,
+        text=True
     )
-    print(f'{base_command}"')
+    with os.fdopen(fd, 'w') as f:
+        f.writelines(script_lines)
+    print(f"submit script written to {tmp_path}")
 
-    if len(cfg.script_overrides) > 0:
+    bsub_command += (
+        f' /bin/bash -l -c "{tmp_path}'
+    )
 
-        arg_names = cfg.script_overrides.keys()
-        arg_vals = cfg.script_overrides.values()
-        arg_combos = list(itertools.product(*arg_vals))
+    overrides = []
+    if cfg.script_overrides is not None:
+        print(f"loading overrides from {cfg.script_overrides}")
+        with open(cfg.script_overrides, "r") as f:
+            overrides = yaml.safe_load(f)
+
+    if len(overrides) > 0:
+
+        if isinstance(overrides, list):
+            parsed_overrides = overrides
+        elif isinstance(overrides, dict):
+            parsed_overrides = list()
+            for k, vs in overrides.items():
+                parsed_overrides.append([f"{k}={v}" for v in vs])
+            parsed_overrides = list(itertools.product(*parsed_overrides))
+            parsed_overrides = [" ".join(override) for override in parsed_overrides]
+        else:
+            raise ValueError
         
-        for arg_combo in arg_combos:
-            override = " ".join([f"{arg_name}={arg_val}" for arg_name, arg_val in zip(arg_names, arg_combo)])
-            command = base_command + " " + override + '"'
+        for override in parsed_overrides:
+            command = bsub_command + " " + override + '"'
             try:
                 print(command)
                 if not cfg.dry:
@@ -161,7 +201,7 @@ def main():
                 print(f"Script exited with error: {e.returncode}")
                 sys.exit(e.returncode)
     else:
-        command = base_command + '"'
+        command = bsub_command + '"'
         try:
             print(command)
             if not cfg.dry:
