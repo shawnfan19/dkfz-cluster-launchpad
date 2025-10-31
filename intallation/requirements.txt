@@ -1,0 +1,10 @@
+jupyterlab
+jupytext
+matplotlib
+omegaconf
+pre-commit
+pyyaml
+seaborn
+tqdm
+wandb
+
