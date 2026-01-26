@@ -181,7 +181,7 @@ def main():
             parsed_overrides = list()
             for k, vs in overrides.items():
                 parsed_overrides.append([f"{k}={v}" for v in vs])
-            parsed_overrides = list(itertools.product(*overrides))
+            parsed_overrides = list(itertools.product(*parsed_overrides))
             parsed_overrides = [" ".join(override) for override in parsed_overrides]
         else:
             raise ValueError

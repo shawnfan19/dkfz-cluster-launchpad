@@ -1,5 +1,6 @@
 jupyterlab
 jupytext
+ipywidgets
 matplotlib
 omegaconf
 pre-commit
